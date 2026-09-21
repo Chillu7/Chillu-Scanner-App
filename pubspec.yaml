@@ -1,0 +1,45 @@
+name: chillu_scanner
+description: "Chillu Scanner - Scan. Convert. Compress."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.13.1 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  
+  # Local Storage & Database
+  sqflite: ^2.3.0
+  path_provider: ^2.1.1
+  
+  # Media & Hardware Permissions
+  camera: ^0.12.1
+  image_picker: ^1.0.4
+  permission_handler: ^11.3.0
+  file_picker: ^13.1.0
+  device_info_plus: ^13.2.0
+  
+  # Document Generation & Sharing
+  pdf: ^3.11.0
+  printing: ^5.13.0
+  share_plus: ^13.3.0
+  
+  # Image Manipulation & Processing
+  image: ^4.2.0
+  
+  # State Management & Helpers
+  provider: ^6.0.5
+  intl: ^0.20.3
+  image_cropper: ^12.2.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
