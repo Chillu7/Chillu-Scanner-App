@@ -1,12 +1,23 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
 import 'core/constants/colors.dart';
 import 'providers/theme_provider.dart';
 import 'providers/document_provider.dart';
 import 'screens/splash/splash_screen.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // On web, the normal sqflite plugin does not work, so use the
+  // browser-compatible SQLite engine (data is stored in the browser's IndexedDB).
+  // This must run BEFORE runApp so the database is ready when providers load.
+  if (kIsWeb) {
+    databaseFactory = databaseFactoryFfiWeb;
+  }
+
   runApp(
     MultiProvider(
       providers: [

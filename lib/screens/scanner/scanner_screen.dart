@@ -6,8 +6,9 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:provider/provider.dart';
 import 'package:image/image.dart' as img;
 import '../../core/constants/colors.dart';
-import '../../core/services/image_crop_service.dart'; // NEW: crop editor helper
-import '../../core/services/storage_service.dart'; // NEW: Chillu Scanner folder + permissions
+import '../../core/services/file_download.dart'; // NEW: browser download (web)
+import '../../core/services/image_crop_service.dart'; // crop editor helper
+import '../../core/services/storage_service.dart'; // Chillu Scanner folder + permissions
 import '../../models/document_model.dart';
 import '../../providers/document_provider.dart';
 
@@ -20,7 +21,7 @@ class ScannerScreen extends StatefulWidget {
 }
 
 class _ScannerScreenState extends State<ScannerScreen> {
-  // NEW: when true, the crop editor opens automatically after every capture/import.
+  // When true, the crop editor opens automatically after every capture/import.
   // Set to false to crop only via the crop button on each page card.
   static const bool _autoCropOnAdd = true;
 
@@ -40,7 +41,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
     }
   }
 
-  /// NEW: Opens the crop editor for [sourcePath].
+  /// Opens the crop editor for [sourcePath].
   /// Returns the cropped file path, or null if the user cancelled
   /// (or if cropping is not supported, e.g. on web).
   Future<String?> _cropImage(String sourcePath) async {
@@ -49,7 +50,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
     return cropped?.path;
   }
 
-  /// NEW: Adds one picked image as a page. Optionally crops it first.
+  /// Adds one picked image as a page. Optionally crops it first.
   /// If the user cancels the crop screen, the original image is kept.
   Future<void> _addPage(XFile photo) async {
     String pagePath = photo.path;
@@ -71,7 +72,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
     });
   }
 
-  /// NEW: Re-crops a page that is already in the list.
+  /// Re-crops a page that is already in the list.
   Future<void> _cropExistingPage(int index) async {
     try {
       final croppedPath = await _cropImage(_capturedImages[index]);
@@ -125,7 +126,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
     });
   }
 
-  // CHANGED: now uses StorageService, which requests the storage permission and
+  // Uses StorageService, which requests the storage permission and
   // returns /storage/emulated/0/Chillu Scanner (or a safe fallback folder).
   Future<String> _getChilluScannerFolder() async {
     if (kIsWeb) return 'web_memory';
@@ -217,6 +218,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
         await file.writeAsBytes(pdfBytes);
         finalPath = file.path;
       } else {
+        // NEW: the web has no file system, so send the PDF to the browser as a download
+        await downloadFileBytes(pdfBytes, cleanName);
         finalPath = '$folderPath/$cleanName';
       }
 
@@ -233,7 +236,13 @@ class _ScannerScreenState extends State<ScannerScreen> {
       if (mounted) {
         await context.read<DocumentProvider>().createDocument(newDoc);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("PDF created successfully inside Chillu Scanner folder: $cleanName")),
+          SnackBar(
+            content: Text(
+              kIsWeb
+                  ? "PDF created and downloaded: $cleanName"
+                  : "PDF created successfully inside Chillu Scanner folder: $cleanName",
+            ),
+          ),
         );
         Navigator.pop(context);
       }
@@ -329,7 +338,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 crossAxisCount: isWideScreen ? 3 : 1,
                 crossAxisSpacing: 12,
                 mainAxisSpacing: 12,
-                mainAxisExtent: 180, // CHANGED: 150 -> 180 so the extra crop button fits
+                mainAxisExtent: 180, // 150 -> 180 so the crop button fits
               ),
               itemBuilder: (context, index) {
                 final currentFilter = _processedFilters[index] ?? 'Original';
@@ -390,7 +399,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                         Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            // NEW: crop button for this page
+                            // Crop button for this page (disabled on web for now)
                             IconButton(
                               icon: const Icon(Icons.crop_rounded, color: AppColors.primary),
                               tooltip: "Crop",

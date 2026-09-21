@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image/image.dart' as img;
@@ -8,7 +9,8 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants/colors.dart';
-import '../../core/services/storage_service.dart'; // adjust path if needed
+import '../../core/services/file_download.dart'; // NEW: browser download (web)
+import '../../core/services/storage_service.dart';
 import '../../models/document_model.dart';
 import '../../providers/document_provider.dart';
 
@@ -34,7 +36,10 @@ class _PdfCompressorScreenState extends State<PdfCompressorScreen> {
     'High': _CompressionSettings(80, 45),
   };
 
-  File? _selectedFile;
+  // The selected PDF is kept as bytes so the same code works on web and mobile
+  // (the web has no file paths).
+  Uint8List? _selectedBytes;
+  String? _selectedName;
   String? _originalSizeStr;
   int _originalSizeBytes = 0;
   String _compressionLevel = 'Medium'; // Low, Medium, High
@@ -46,9 +51,13 @@ class _PdfCompressorScreenState extends State<PdfCompressorScreen> {
   String? _compressedSizeStr;
   String? _savedSizeStr;
   double? _reductionPercentage;
-  String? _compressedPath;
+  String? _savedLocation; // file path on mobile, or a download message on web
   bool _alreadyOptimized = false;
   bool _savedInRootFolder = true;
+
+  // Kept so the user can download the result again on web
+  Uint8List? _outputBytes;
+  String? _outputName;
 
   String _formatBytes(int bytes, {int decimals = 2}) {
     if (bytes <= 0) return "0 B";
@@ -67,27 +76,33 @@ class _PdfCompressorScreenState extends State<PdfCompressorScreen> {
 
   Future<void> _pickPdfDocument() async {
     try {
-      final result = await FilePicker.pickFiles(
+      // file_picker v12: pickFiles() returns a list (empty if the user cancels)
+      final files = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf'],
       );
 
-      if (result != null && result.isNotEmpty && result.single.path != null) {
-        final path = result.single.path!;
-        final file = File(path);
-        final sizeBytes = await file.length();
+      if (files.isNotEmpty) {
+        final picked = files.first; // only the first selected PDF is used
+
+        // readAsBytes() works on web (no file paths) and on mobile
+        final Uint8List fileBytes = await picked.readAsBytes();
+
         setState(() {
-          _selectedFile = file;
-          _originalSizeBytes = sizeBytes;
-          _originalSizeStr = _formatBytes(sizeBytes);
+          _selectedBytes = fileBytes;
+          _selectedName = picked.name;
+          _originalSizeBytes = fileBytes.length;
+          _originalSizeStr = _formatBytes(fileBytes.length);
           // Reset values from any previous run
           _compressedSizeBytes = null;
           _compressedSizeStr = null;
           _savedSizeStr = null;
           _reductionPercentage = null;
-          _compressedPath = null;
+          _savedLocation = null;
           _alreadyOptimized = false;
           _savedInRootFolder = true;
+          _outputBytes = null;
+          _outputName = null;
         });
       }
     } catch (e) {
@@ -130,7 +145,7 @@ class _PdfCompressorScreenState extends State<PdfCompressorScreen> {
   }
 
   Future<void> _compressWorkflow() async {
-    if (_selectedFile == null) return;
+    if (_selectedBytes == null) return;
 
     setState(() {
       _isCompressing = true;
@@ -138,7 +153,7 @@ class _PdfCompressorScreenState extends State<PdfCompressorScreen> {
     });
 
     try {
-      final originalBytes = await _selectedFile!.readAsBytes();
+      final originalBytes = _selectedBytes!;
       final settings = _settings[_compressionLevel]!;
 
       // Build a brand-new, valid PDF one page at a time
@@ -189,25 +204,42 @@ class _PdfCompressorScreenState extends State<PdfCompressorScreen> {
         alreadyOptimized = true;
       }
 
-      // Save into the "Chillu Scanner" folder in root storage
-      if (mounted) setState(() => _progressText = 'Saving file...');
-      final outputDir = await StorageService.getAppDirectory();
-      final savedInRoot = StorageService.isInRootStorage(outputDir);
-
-      final originalName = _selectedFile!.path.split('/').last;
-      final desiredName = originalName.replaceAll(
+      // Build the output file name: "<name>_compressed.pdf"
+      final originalName = _selectedName ?? 'document.pdf';
+      final baseName = originalName.replaceAll(
         RegExp(r'\.pdf$', caseSensitive: false),
-        '_compressed.pdf',
+        '',
       );
+      final desiredName = '${baseName}_compressed.pdf';
 
-      // Never overwrite an existing file: adds " (1)", " (2)", ... if needed
-      final targetPath = StorageService.uniquePath(outputDir, desiredName);
-      final finalName = targetPath.split('/').last;
+      String finalName;
+      String savedLocation;
+      String recordPath;
+      bool savedInRoot = true;
 
-      final File compressedFile = File(targetPath);
-      await compressedFile.writeAsBytes(outputBytes, flush: true);
+      if (mounted) setState(() => _progressText = 'Saving file...');
 
-      final int actualCompressedSize = await compressedFile.length();
+      if (kIsWeb) {
+        // WEB: send the file to the browser as a download
+        finalName = desiredName;
+        await downloadFileBytes(outputBytes, finalName);
+        savedLocation = "Downloaded through your browser as:\n$finalName";
+        recordPath = 'web_download/$finalName';
+      } else {
+        // MOBILE: save into the "Chillu Scanner" folder in root storage
+        final outputDir = await StorageService.getAppDirectory();
+        savedInRoot = StorageService.isInRootStorage(outputDir);
+
+        // Never overwrite an existing file: adds " (1)", " (2)", ... if needed
+        final targetPath = StorageService.uniquePath(outputDir, desiredName);
+        finalName = targetPath.split('/').last;
+        await File(targetPath).writeAsBytes(outputBytes, flush: true);
+
+        savedLocation = "Saved to:\n$targetPath";
+        recordPath = targetPath;
+      }
+
+      final int actualCompressedSize = outputBytes.length;
       final savedBytes = _originalSizeBytes > actualCompressedSize
           ? _originalSizeBytes - actualCompressedSize
           : 0;
@@ -222,15 +254,17 @@ class _PdfCompressorScreenState extends State<PdfCompressorScreen> {
           _compressedSizeStr = _formatBytes(actualCompressedSize);
           _savedSizeStr = _formatBytes(savedBytes);
           _reductionPercentage = pct;
-          _compressedPath = targetPath;
+          _savedLocation = savedLocation;
           _alreadyOptimized = alreadyOptimized;
           _savedInRootFolder = savedInRoot;
+          _outputBytes = outputBytes;
+          _outputName = finalName;
         });
       }
 
       final compressedDoc = DocumentModel(
         name: finalName,
-        path: targetPath,
+        path: recordPath,
         type: 'pdf',
         size: actualCompressedSize,
         pages: pageCount,
@@ -245,6 +279,8 @@ class _PdfCompressorScreenState extends State<PdfCompressorScreen> {
             content: Text(
               alreadyOptimized
                   ? "This PDF is already well optimized. A copy of the original was saved."
+                  : kIsWeb
+                  ? "PDF compressed and downloaded!"
                   : "PDF compressed and saved to the Chillu Scanner folder!",
             ),
           ),
@@ -263,6 +299,19 @@ class _PdfCompressorScreenState extends State<PdfCompressorScreen> {
           _progressText = '';
         });
       }
+    }
+  }
+
+  /// Web only: downloads the compressed PDF again.
+  Future<void> _downloadAgain() async {
+    if (_outputBytes == null || _outputName == null) return;
+    try {
+      await downloadFileBytes(_outputBytes!, _outputName!);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Download failed: $e")),
+      );
     }
   }
 
@@ -296,9 +345,7 @@ class _PdfCompressorScreenState extends State<PdfCompressorScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              _selectedFile != null
-                                  ? _selectedFile!.path.split('/').last
-                                  : "No Document Selected",
+                              _selectedName ?? "No Document Selected",
                               style: const TextStyle(
                                   fontWeight: FontWeight.bold, fontSize: 14),
                               maxLines: 1,
@@ -306,9 +353,9 @@ class _PdfCompressorScreenState extends State<PdfCompressorScreen> {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              _selectedFile != null
+                              _selectedBytes != null
                                   ? "Original Size: $_originalSizeStr"
-                                  : "Select a PDF file from storage to compress.",
+                                  : "Select a PDF file to compress.",
                               style: const TextStyle(
                                   fontSize: 12, color: Colors.grey),
                             ),
@@ -320,7 +367,8 @@ class _PdfCompressorScreenState extends State<PdfCompressorScreen> {
                         style: ElevatedButton.styleFrom(
                             backgroundColor: AppColors.primary,
                             foregroundColor: Colors.white),
-                        child: Text(_selectedFile != null ? "Change" : "Choose"),
+                        child:
+                        Text(_selectedBytes != null ? "Change" : "Choose"),
                       )
                     ],
                   ),
@@ -328,7 +376,7 @@ class _PdfCompressorScreenState extends State<PdfCompressorScreen> {
               ),
               const SizedBox(height: 20),
 
-              if (_selectedFile != null) ...[
+              if (_selectedBytes != null) ...[
                 const Text(
                   "Select Compression Level",
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
@@ -497,20 +545,42 @@ class _PdfCompressorScreenState extends State<PdfCompressorScreen> {
                 if (_alreadyOptimized) ...[
                   const SizedBox(height: 12),
                   const Text(
-                    "This file is already small or optimized. Compressing it further would have increased its size, so a copy of the original was saved.",
+                    "This file is already small or optimized. Compressing it further would have increased its size, so a copy of the original was used.",
                     style: TextStyle(fontSize: 12, color: Colors.orangeAccent),
                   ),
                 ],
-                if (!_savedInRootFolder) ...[
+                if (!kIsWeb && !_savedInRootFolder) ...[
                   const SizedBox(height: 12),
                   const Text(
                     "Storage permission was not granted, so the file was saved in the app's private folder instead of the device root. Allow 'All files access' for this app to save into the root Chillu Scanner folder.",
                     style: TextStyle(fontSize: 12, color: Colors.orangeAccent),
                   ),
                 ],
+
+                // Web only: button to download the compressed PDF again
+                if (kIsWeb && _outputBytes != null) ...[
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 46,
+                    child: ElevatedButton.icon(
+                      onPressed: _downloadAgain,
+                      icon: const Icon(Icons.download_rounded),
+                      label: const Text("Download Compressed PDF",
+                          style: TextStyle(fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                  ),
+                ],
+
                 const SizedBox(height: 16),
                 Text(
-                  "Saved to:\n$_compressedPath",
+                  _savedLocation ?? '',
                   style: const TextStyle(fontSize: 11, color: Colors.grey),
                   textAlign: TextAlign.center,
                 )
