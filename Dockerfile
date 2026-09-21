@@ -1,11 +1,8 @@
-# =========================
-# BUILD STAGE
-# =========================
 FROM ubuntu:24.04 AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install required tools
+# Install required packages
 RUN apt-get update && apt-get install -y \
     curl \
     git \
@@ -17,52 +14,44 @@ RUN apt-get update && apt-get install -y \
     tar \
     && rm -rf /var/lib/apt/lists/*
 
-# Create normal user
-RUN groupadd -g 1000 flutter \
-    && useradd -m -u 1000 -g 1000 flutter
-
-# Install Flutter
+# Install Flutter 3.47.1
 WORKDIR /opt
 
 RUN git clone --depth 1 --branch 3.47.1 \
     https://github.com/flutter/flutter.git
 
-RUN chown -R flutter:flutter /opt/flutter
-
 ENV PATH="/opt/flutter/bin:/opt/flutter/bin/cache/dart-sdk/bin:$PATH"
 
-# Use non-root user
-USER flutter
-
-# Check Flutter
-RUN flutter --version
+# Flutter configuration
+RUN flutter config --enable-web
+RUN flutter config --no-analytics
 
 # Project
 WORKDIR /app
 
 # Copy project
-COPY --chown=flutter:flutter . .
+COPY . .
 
-# Remove native platforms temporarily.
-# We are building WEB only.
+# We only need Web for this Render deployment
 RUN rm -rf android ios macos windows linux
 
-# Get Dart/Flutter dependencies
+# Get dependencies
 RUN flutter pub get
 
-# Build Flutter Web
+# Build Web
 RUN flutter build web --release
 
 
 # =========================
-# PRODUCTION STAGE
+# NGINX
 # =========================
+
 FROM nginx:alpine
 
-# Copy Flutter web output
+# Copy Flutter Web build
 COPY --from=build /app/build/web /usr/share/nginx/html
 
-# Render uses PORT 10000 by default
+# Configure Nginx for Render
 RUN sed -i 's/listen       80;/listen       10000;/' /etc/nginx/conf.d/default.conf
 
 EXPOSE 10000
