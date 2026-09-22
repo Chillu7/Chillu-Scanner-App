@@ -14,9 +14,9 @@
         tools:replace="android:maxSdkVersion"/>
 
     <application
-        android:label="chillu_scanner"
+        android:label="Chillu Scanner"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@mipmap/launcher_icon"
         android:requestLegacyExternalStorage="true">
 
         <!-- Crop editor screen used by image_cropper (works fully offline).
