@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../core/constants/colors.dart';
 import '../../providers/document_provider.dart';
 import '../../widgets/custom_widgets.dart';
+import '../../widgets/download_button.dart'; // NEW: single import, no "hide"
 import '../scanner/scanner_screen.dart';
 import '../pdf_viewer/pdf_viewer_screen.dart';
 import '../pdf_compressor/pdf_compressor_screen.dart';
@@ -43,6 +44,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final docProvider = Provider.of<DocumentProvider>(context);
     final recentDocs = docProvider.documents.take(3).toList();
+    // NOTE: the stray "const DownloadButton();" line was removed from here.
+    // A widget must be placed inside the tree below to actually render.
 
     return Scaffold(
       appBar: AppBar(
@@ -116,6 +119,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                   ),
+
+                  // NEW: Download button — only renders on web (returns
+                  // SizedBox.shrink() on Android/iOS, see download_button.dart)
+                  const SizedBox(height: 16),
+                  const Center(child: DownloadButton()),
+
                   const SizedBox(height: 16),
 
                   // Core Utility Actions Title
